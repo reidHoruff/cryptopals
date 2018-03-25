@@ -3,6 +3,7 @@ import base64
 from itertools import cycle
 from functools import reduce
 import doctest
+import pyaes
 
 freq = b'etaoinshrdlcumwfgypbvkjxqz'
 engl = b' ,.\'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:\n'
@@ -152,6 +153,9 @@ def file_lines(fname: str, decode=16) -> list:
             return [line.encode() for line in lines]
         if decode == 16:
             return [from_hex_str(line) for line in lines]
+        if decode == 64:
+            return from_b64(''.join(lines))
+
 
 def file_blob(fname: str, decode=None) -> list:
     with open(fname) as f:
@@ -178,6 +182,19 @@ def to_b64(a: bytes) -> str:
 def plist(l: list):
     for r in l:
         print(r)
+
+
+def aes_ecb_decode(blob: bytes, key: bytes) -> bytes:
+    """
+    Decodes the blob in 16 bytes chunks.
+    Returns the concatination of all 16 byte results.
+    """
+    aes = pyaes.AESModeOfOperationECB(key)
+    comb = bytearray()
+    for b in divide(blob, 16):
+        comb += aes.decrypt(b)
+    return comb
+
 
 def main():
     parser = ap.ArgumentParser()
@@ -218,10 +235,8 @@ def main():
             print(xor_cycle(data, key))
 
     if args.dout == 'ch7':
-        full = bytearray()
-        for blob in file_lines(a, decode=64):
-            full += blob
-
+        blob = file_lines(a, decode=64)
+        print(aes_ecb_decode(blob, 'YELLOW SUBMARINE'.encode()).decode())
 
 
 if __name__ == '__main__':
