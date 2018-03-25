@@ -89,7 +89,7 @@ def solve_block_keys(data: bytes):
     for keylen, hamdist in keysize_by_hamdist(data):
         key_parts = []
         for trans in transpose(data, keylen):
-            key, score, decoded = best_english_xor_decode(trans)
+            key, score, decoded = xor_key_w_most_engl(trans)
             key_parts.append(key)
         if not repeats(key_parts):
             yield (keylen, hamdist, bytes(key_parts))
@@ -117,7 +117,7 @@ def xor_cycle(data: bytes, key: bytes) -> bytes:
     return bytes([x^y for x, y in zip(data, cycle(key))])
 
 
-def best_english_xor_decode(a: bytes) -> tuple:
+def xor_key_w_most_engl(a: bytes) -> tuple:
     """
     Xor the string against all single character strings.
     Return the decoded string with the most english characters.
@@ -144,8 +144,6 @@ def tsort(l: list, index: int, reverse=False) -> list:
     """
     return sorted(l, key=lambda w: w[index], reverse=reverse)
 
-def find_best_english_decode(data: list) -> tuple:
-    return tsort(map(best_english_xor_decode, data, reverse=True), 1)[0]
 
 def file_lines(fname: str, decode=16) -> list:
     with open(fname) as f:
@@ -181,3 +179,51 @@ def plist(l: list):
     for r in l:
         print(r)
 
+def main():
+    parser = ap.ArgumentParser()
+    parser.add_argument('--a', type=str)
+    parser.add_argument('--b', type=str)
+    parser.add_argument('--dout', type=str)
+    args = parser.parse_args()
+
+    a = args.a
+    b = args.b
+
+    if args.dout == 'ch1':
+        print(to_b64(from_hex_str(a)))
+
+    if args.dout == 'ch2':
+        print(to_b16(xor_cycle(from_hex_str(a), from_hex_str(b))))
+
+    if args.dout == 'ch3':
+        data = from_hex_str(a)
+        print(xor_key_w_most_engl(data))
+
+    if args.dout == 'ch4':
+        data = file_lines(a, decode=16)
+        print(tsort(map(xor_key_w_most_engl, data), 1, reverse=True)[0])
+
+    if args.dout == 'ch5':
+        data = file_blob(a, decode=None)
+        print(data)
+        key = b.encode()
+        print(to_b16(xor_cycle(data, key)))
+
+    if args.dout == 'ch6':
+        data = file_blob(a, decode=64)
+        keys = solve_block_keys(data)
+        for keysize, hamdist, key in keys:
+            print()
+            print((keysize, hamdist, key))
+            print(xor_cycle(data, key))
+
+    if args.dout == 'ch7':
+        full = bytearray()
+        for blob in file_lines(a, decode=64):
+            full += blob
+
+
+
+if __name__ == '__main__':
+    doctest.testmod()
+    main()
