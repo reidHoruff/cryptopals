@@ -7,6 +7,7 @@ import pyaes
 
 freq = b'etaoinshrdlcumwfgypbvkjxqz'
 engl = b' ,.\'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:\n'
+YS = b'YELLOW SUBMARINE'
 
 
 def repeats(a: bytes) -> bool:
@@ -14,6 +15,8 @@ def repeats(a: bytes) -> bool:
     >>> repeats(b'ii')
     True
     >>> repeats(b'iii')
+    False
+    >>> repeats(b'abac')
     False
     """
     if len(a) % 2 == 1:
@@ -24,12 +27,31 @@ def repeats(a: bytes) -> bool:
     return a[:h] == a[h:]
 
 
+def inc_blob(n: int) -> bytes:
+    """
+    Blob of incrementing byte values of len N.
+
+    >>> inc_blob(1)
+    b'\\x00'
+    >>> inc_blob(3)
+    b'\\x00\\x01\\x02'
+    >>> len(inc_blob(16))
+    16
+    >>> len(inc_blob(1000))
+    1000
+    """
+    return bytes([i % 256 for i in range(n)])
+
+
 def eng_score(a: bytes) -> int:
     """
+    How many english characters?
+
     >>> eng_score(b'hel\x0flo!')
     5
     """
     return len(list(filter(lambda c: c in engl, a)))
+
 
 def ham(a: bytes, b: bytes) -> int:
     """
@@ -51,10 +73,15 @@ def ham(a: bytes, b: bytes) -> int:
 
 def divide(a: bytes, size: str) -> list:
     """
-    >>> list(divide('abcde', 2))
-    ['ab', 'cd', 'e']
-    >>> list(divide('abcde', 100))
-    ['abcde']
+    Divides input into chunks of size N.
+    Last chunk len will be <= N
+
+    >>> list(divide(b'abcde', 2))
+    [b'ab', b'cd', b'e']
+    >>> list(divide(b'abcde', 100))
+    [b'abcde']
+    >>> list(divide(b'abcde', 5))
+    [b'abcde']
     """
     for start in range(0, len(a), size):
         yield a[start:start + size]
@@ -76,7 +103,6 @@ def transpose(data: bytes, keylen) -> list:
         for b in filter(lambda block: len(block) > index, blocks):
             t.append(b[index])
         yield bytes(t)
-
 
 
 def solve_block_keys(data: bytes):
@@ -115,13 +141,17 @@ def keysize_by_hamdist(data: bytes) -> tuple:
 
 
 def xor_cycle(data: bytes, key: bytes) -> bytes:
+    """
+    Cyclically xor key over data.
+    """
     return bytes([x^y for x, y in zip(data, cycle(key))])
 
 
 def xor_key_w_most_engl(a: bytes) -> tuple:
     """
-    Xor the string against all single character strings.
-    Return the decoded string with the most english characters.
+    Find the single byte Xor key which produces the
+    most english characters.
+
     """
     max_score = 0
     winner = None
@@ -140,8 +170,6 @@ def xor_key_w_most_engl(a: bytes) -> tuple:
 def tsort(l: list, index: int, reverse=False) -> list:
     """
     Sorts a list of tuples by an column in that tuple.
-
-    Largest at index 0
     """
     return sorted(l, key=lambda w: w[index], reverse=reverse)
 
@@ -153,8 +181,11 @@ def file_lines(fname: str, decode=16) -> list:
             return [line.encode() for line in lines]
         if decode == 16:
             return [from_hex_str(line) for line in lines]
-        if decode == 64:
-            return from_b64(''.join(lines))
+
+def b64_file(fname: str) -> bytes:
+    with open(fname) as f:
+        lines = [line.strip() for line in f.readlines()]
+        return from_b64(''.join(lines))
 
 
 def file_blob(fname: str, decode=None) -> list:
@@ -171,10 +202,18 @@ def from_hex_str(a: str) -> bytes:
     return bytes.fromhex(a)
 
 def from_b64(a: str) -> bytes:
+    """
+    >>> from_b64('AAAA')
+    b'\\x00\\x00\\x00'
+    """
     return base64.b64decode(a)
 
-def to_b16(a: bytes) -> str:
-    return base64.b16encode(a)
+def to_hex(a: bytes) -> str:
+    """
+    >>> to_hex(b'AA')
+    '4141'
+    """
+    return a.hex()
 
 def to_b64(a: bytes) -> str:
     return base64.b64encode(a)
@@ -184,16 +223,73 @@ def plist(l: list):
         print(r)
 
 
-def aes_ecb_decode(blob: bytes, key: bytes) -> bytes:
+def aes_ecb_dec(blob: bytes, key: bytes) -> bytes:
     """
     Decodes the blob in 16 bytes chunks.
     Returns the concatination of all 16 byte results.
     """
     aes = pyaes.AESModeOfOperationECB(key)
-    comb = bytearray()
+    comb = b''
     for b in divide(blob, 16):
         comb += aes.decrypt(b)
     return comb
+
+def aes_ecb_enc(blob: bytes, key: bytes) -> bytes:
+    """
+    Encodes the blob in 16 bytes chunks.
+    Returns the concatination of all 16 byte results.
+
+    >>> a = aes_ecb_enc(pad_to_len(b'horuff', 16), YS)
+    >>> b = aes_ecb_dec(a, YS)
+    >>> b == pad_to_len(b'horuff', 16)
+    True
+    """
+
+    aes = pyaes.AESModeOfOperationECB(key)
+    comb = b''
+    for b in divide(blob, 16):
+        comb += aes.encrypt(b)
+    return comb
+
+
+def aes_cbc_enc(blob: bytes, key: bytes) -> bytes:
+    """
+    >>> out = aes_cbc_enc(inc_blob(16), inc_blob(16))
+    >>> len(out)
+    16
+    >>> out = aes_cbc_enc(inc_blob(19), inc_blob(16))
+    >>> len(out)
+    32
+    """
+
+    previous = bytes([0] * 16)
+    out = b''
+
+    for chunk in divide(pad_to_nearest(blob, 16), 16):
+        previous = aes_ecb_enc(xor_cycle(chunk, previous), key)
+        out += previous
+
+    return out
+
+def aes_cbc_dec(blob: bytes, key: bytes) -> bytes:
+    """
+    >>> encoded = aes_cbc_enc(inc_blob(128), inc_blob(16))
+    >>> decoded = aes_cbc_dec(encoded, inc_blob(16))
+    >>> decoded == inc_blob(128)
+    True
+    """
+
+    assert len(blob) % 16 == 0
+
+    previous = bytes([0] * 16)
+    out = b''
+
+    for chunk in divide(blob, 16):
+        decoded = xor_cycle(aes_ecb_dec(chunk, key), previous)
+        previous = chunk
+        out += decoded
+
+    return out
 
 
 def find_repeat(blob: bytes, size: int) -> bool:
@@ -217,6 +313,45 @@ def find_repeat(blob: bytes, size: int) -> bool:
     return False
 
 
+def create_pad(n: int) -> bytes:
+    """
+    >>> to_hex(create_pad(1))
+    '01'
+    >>> to_hex(create_pad(5))
+    '0505050505'
+    >>> to_hex(create_pad(0))
+    ''
+    """
+    return bytes([n for i in range(n)])
+
+
+def pad_to_len(a: bytes, n: int) -> bytes:
+    """
+    >>> pad_to_len(YS, 20)
+    b'YELLOW SUBMARINE\\x04\\x04\\x04\\x04'
+    """
+    return a + create_pad(n - len(a))
+
+def pad_to_nearest(a: bytes, n: int) -> bytes:
+    """
+    Pad to a length modulus.
+    ie, pad the the next multiple of N.
+
+    >>> pad_to_nearest(b'foo', 2)
+    b'foo\\x01'
+    >>> pad_to_nearest(b'foo', 5)
+    b'foo\\x02\\x02'
+    >>> pad_to_nearest(b'12345', 4)
+    b'12345\\x03\\x03\\x03'
+    >>> pad_to_nearest(b'12345', 5)
+    b'12345'
+    """
+    if len(a) % n == 0:
+        return a
+
+    return a + create_pad(n - (len(a) % n))
+
+
 def main():
     parser = ap.ArgumentParser()
     parser.add_argument('--a', type=str)
@@ -231,7 +366,7 @@ def main():
         print(to_b64(from_hex_str(a)))
 
     if args.dout == 'ch2':
-        print(to_b16(xor_cycle(from_hex_str(a), from_hex_str(b))))
+        print(to_hex(xor_cycle(from_hex_str(a), from_hex_str(b))))
 
     if args.dout == 'ch3':
         data = from_hex_str(a)
@@ -245,7 +380,7 @@ def main():
         data = file_blob(a, decode=None)
         print(data)
         key = b.encode()
-        print(to_b16(xor_cycle(data, key)))
+        print(to_hex(xor_cycle(data, key)))
 
     if args.dout == 'ch6':
         data = file_blob(a, decode=64)
@@ -256,8 +391,8 @@ def main():
             print(xor_cycle(data, key))
 
     if args.dout == 'ch7':
-        blob = file_lines(a, decode=64)
-        print(aes_ecb_decode(blob, 'YELLOW SUBMARINE'.encode()).decode())
+        blob = b64_file(a)
+        print(aes_ecb_dec(blob, YS).decode())
 
     if args.dout == 'ch8':
         for dat in file_lines(a, decode=16):
@@ -265,6 +400,9 @@ def main():
             if r:
                 print(r)
 
+    if args.dout == 'ch10':
+        blob = b64_file(a)
+        print(aes_cbc_dec(blob, YS))
 
 
 if __name__ == '__main__':
