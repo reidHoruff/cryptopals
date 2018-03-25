@@ -196,6 +196,27 @@ def aes_ecb_decode(blob: bytes, key: bytes) -> bytes:
     return comb
 
 
+def find_repeat(blob: bytes, size: int) -> bool:
+    """
+    Are there duplicate N byte blocks in the blob?
+
+    >>> find_repeat(b'abceeeabc', 3)
+    b'abc'
+    >>> find_repeat(b'abceeeabc', 4)
+    False
+    >>> find_repeat(b'aa', 1)
+    b'a'
+    """
+    blocks = list(divide(blob, size))
+    found = set()
+    for block in blocks:
+        if block in found:
+            return block
+        found.add(block)
+
+    return False
+
+
 def main():
     parser = ap.ArgumentParser()
     parser.add_argument('--a', type=str)
@@ -237,6 +258,13 @@ def main():
     if args.dout == 'ch7':
         blob = file_lines(a, decode=64)
         print(aes_ecb_decode(blob, 'YELLOW SUBMARINE'.encode()).decode())
+
+    if args.dout == 'ch8':
+        for dat in file_lines(a, decode=16):
+            r = find_repeat(dat, 16)
+            if r:
+                print(r)
+
 
 
 if __name__ == '__main__':
