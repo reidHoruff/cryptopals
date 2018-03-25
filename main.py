@@ -4,19 +4,30 @@ from itertools import cycle
 from functools import reduce
 import doctest
 import pyaes
+from random import randint
 
 freq = b'etaoinshrdlcumwfgypbvkjxqz'
 engl = b' ,.\'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:\n'
 YS = b'YELLOW SUBMARINE'
 
 
-def repeats(a: bytes) -> bool:
+def random_bytes(n: int) -> bytes:
     """
-    >>> repeats(b'ii')
+    >>> len(random_bytes(3000))
+    3000
+    >>> len(random_bytes(1))
+    1
+    """
+    return bytes([randint(0, 255) for _ in range(n)])
+
+
+def is_repeating(a: bytes) -> bool:
+    """
+    >>> is_repeating(b'ii')
     True
-    >>> repeats(b'iii')
+    >>> is_repeating(b'iii')
     False
-    >>> repeats(b'abac')
+    >>> is_repeating(b'abac')
     False
     """
     if len(a) % 2 == 1:
@@ -43,11 +54,11 @@ def inc_blob(n: int) -> bytes:
     return bytes([i % 256 for i in range(n)])
 
 
-def eng_score(a: bytes) -> int:
+def english_score(a: bytes) -> int:
     """
     How many english characters?
 
-    >>> eng_score(b'hel\x0flo!')
+    >>> english_score(b'hel\x0flo!')
     5
     """
     return len(list(filter(lambda c: c in engl, a)))
@@ -118,7 +129,7 @@ def solve_block_keys(data: bytes):
         for trans in transpose(data, keylen):
             key, score, decoded = xor_key_w_most_engl(trans)
             key_parts.append(key)
-        if not repeats(key_parts):
+        if not is_repeating(key_parts):
             yield (keylen, hamdist, bytes(key_parts))
 
 
@@ -157,7 +168,7 @@ def xor_key_w_most_engl(a: bytes) -> tuple:
     winner = None
     for key in range(256):
         decoded = xor_cycle(a, bytes([key]))
-        score = eng_score(decoded)
+        score = english_score(decoded)
         if score >= max_score:
             max_score = score
             if score == len(decoded):
@@ -230,9 +241,12 @@ def aes_ecb_dec(blob: bytes, key: bytes) -> bytes:
     """
     aes = pyaes.AESModeOfOperationECB(key)
     comb = b''
+
     for b in divide(blob, 16):
         comb += aes.decrypt(b)
+
     return comb
+
 
 def aes_ecb_enc(blob: bytes, key: bytes) -> bytes:
     """
@@ -247,12 +261,14 @@ def aes_ecb_enc(blob: bytes, key: bytes) -> bytes:
 
     aes = pyaes.AESModeOfOperationECB(key)
     comb = b''
-    for b in divide(blob, 16):
-        comb += aes.encrypt(b)
+
+    for chunk in divide(pad_to_nearest(blob, 16), 16):
+        comb += aes.encrypt(chunk)
+
     return comb
 
 
-def aes_cbc_enc(blob: bytes, key: bytes) -> bytes:
+def aes_cbc_enc(blob: bytes, key: bytes, rand_iv=False) -> bytes:
     """
     >>> out = aes_cbc_enc(inc_blob(16), inc_blob(16))
     >>> len(out)
@@ -263,6 +279,10 @@ def aes_cbc_enc(blob: bytes, key: bytes) -> bytes:
     """
 
     previous = bytes([0] * 16)
+
+    if rand_iv:
+        previous = random_bytes(16)
+
     out = b''
 
     for chunk in divide(pad_to_nearest(blob, 16), 16):
@@ -270,6 +290,7 @@ def aes_cbc_enc(blob: bytes, key: bytes) -> bytes:
         out += previous
 
     return out
+
 
 def aes_cbc_dec(blob: bytes, key: bytes) -> bytes:
     """
@@ -290,6 +311,45 @@ def aes_cbc_dec(blob: bytes, key: bytes) -> bytes:
         out += decoded
 
     return out
+
+
+def enc_oracle(data: bytes) -> bytes:
+    """
+    Does random enc.
+
+    >>> a = enc_oracle(random_bytes(99))
+    >>> a = enc_oracle(random_bytes(99))
+    >>> a = enc_oracle(random_bytes(99))
+    >>> a = enc_oracle(random_bytes(99))
+    >>> a = enc_oracle(random_bytes(99))
+    >>> a = enc_oracle(random_bytes(9999))
+    """
+    rand_key = random_bytes(16)
+
+    data = random_bytes(randint(5, 10)) + data + random_bytes(randint(5, 10))
+
+    if randint(0, 1) == 0:
+        return 'ECB', aes_ecb_enc(data, rand_key)
+
+    else:
+        return 'CBC', aes_cbc_enc(data, rand_key)
+
+
+def detect_oracle():
+    """
+    >>> for _ in range(1000):
+    ...   detect_oracle()
+    """
+
+    inp = bytes([i % 16 for i in range(48)])
+    res = enc_oracle(inp)
+    mode = res[0]
+    ignore, a, b, *_ = divide(res[1], 16)
+
+    if a == b:
+        assert mode == 'ECB'
+    else:
+        assert mode == 'CBC'
 
 
 def find_repeat(blob: bytes, size: int) -> bool:
