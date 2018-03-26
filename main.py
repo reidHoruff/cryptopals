@@ -334,9 +334,17 @@ def enc_oracle(data: bytes) -> bytes:
     else:
         return 'CBC', aes_cbc_enc(data, rand_key)
 
-
 def detect_oracle():
     """
+
+    Creates a packet to be encoded by the oracle.
+    Asserts that the detected encryption scheme was correct.
+
+    Method:
+        create packet of incrementing values % block size (16)
+        see if the second and third block of the oracle output are identical.
+        (the first block contains random data)
+
     >>> for _ in range(1000):
     ...   detect_oracle()
     """
